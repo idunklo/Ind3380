@@ -1,5 +1,5 @@
 CC = mpicc
-CFLAGS = -O2
+CFLAGS = -cc=gcc-5 -std=c99 -fopenmp -O2
 LDFLAGS = -L../simple-jpeg/ -lsimplejpeg
 
 PROJ = parallel_main

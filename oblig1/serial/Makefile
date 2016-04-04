@@ -1,4 +1,4 @@
-CC = gcc
+CC = gcc -g -std=c99
 CFLAGS = -O2
 LDFLAGS = -L../simple-jpeg/ -lsimplejpeg
 
