@@ -31,7 +31,9 @@ void allocate_image(image *u, int m, int n)
     //allocating matrix for image data 
     u -> data_storage = (float*)malloc(m*n*sizeof(float));
     u -> image_data =  (float**)malloc(m*sizeof(float*));
-    for (int i = 0; i < m; i++){
+
+    int i;
+    for (i = 0; i < m; i++){
         u -> image_data[i] = &u -> data_storage[i*n]; } ;
     
     return;
@@ -46,8 +48,9 @@ void deallocate_image(image *u)
 
 void convert_jpeg_to_image(const unsigned char* image_chars, image *u)
 {
-    for (int i = 0; i < u -> m; ++i){
-        for (int j = 0; j < u -> n; ++j){
+    int i, j;
+    for (i = 0; i < u -> m; ++i){
+        for (j = 0; j < u -> n; j++){
             u -> image_data[i][j] = (float)image_chars[i*u->n + j]; 
         }
     }
@@ -56,8 +59,9 @@ void convert_jpeg_to_image(const unsigned char* image_chars, image *u)
 
 void convert_image_to_jpeg(const image *u, unsigned char* image_chars)  
 {
-    for (int i = 0; i < u -> m; ++i){
-        for (int j = 0; j < u -> n; ++j){
+    int i, j;
+    for (i = 0; i < u -> m; ++i){
+        for (j = 0; j < u -> n; ++j){
             image_chars[(i*u->n) + j] =(unsigned char) u -> image_data[i][j];
         }
     }
@@ -66,10 +70,11 @@ void convert_image_to_jpeg(const image *u, unsigned char* image_chars)
 
 void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters)
 { 
-    int counter = 0;
+    int counter = 0;   
+    int i, j;
     while(counter <= iters){
-        for (int i = 1; i < u->m -1; i++){  //should it be -2 or -1?
-            for (int j = 1;  j <  u -> n -1; j++){ //unsure about the same as above
+        for (i = 1; i < u->m -1; i++){  //should it be -2 or -1?
+            for (j = 1;  j <  u -> n -1; j++){ //unsure about the same as above
                 u_bar -> image_data[i][j] = u -> image_data[i][j]
                     + kappa*(u -> image_data[i-1][j] + u -> image_data[i][j-1] 
                     - 4*u -> image_data[i][j] + u -> image_data[i][j+1] + u -> image_data[i+1][j]);

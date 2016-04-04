@@ -36,7 +36,7 @@ void allocate_image(image *u, int m, int n)
     int i;
     for (i = 0; i < m; i++){
         u -> image_data[i] = &u -> data_storage[i*n]; } ;
-    
+
     return;
 }
 
@@ -78,27 +78,30 @@ void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters)
             for (j = 1;  j <  u -> n -1; j++){ //unsure about the same as above
                 u_bar -> image_data[i][j] = u -> image_data[i][j]
                     + kappa*(u -> image_data[i-1][j] + u -> image_data[i][j-1] 
-                    - 4*u -> image_data[i][j] + u -> image_data[i][j+1] + u -> image_data[i+1][j]);
+                            - 4*u -> image_data[i][j] + u -> image_data[i][j+1] + u -> image_data[i+1][j]);
             }
         }
-    counter++;
+        counter++;
     }
 }     
 
-int main(int argc, char *argv[])
+int main(int argc, char *argv[])  
 {
+    //Declaration of variables
     int m, n, c, iters;
     int my_m, my_n, my_rank, num_procs;
     float kappa;
     image u, u_bar, whole_image;
     unsigned char *image_chars, *my_image_chars;
     char *input_jpeg_filename, *output_jpeg_filename;
-
+                 
+    //check for enough arguments
     if(argc!=5){
-                printf("read from command line: kappa, iters,  input_jpeg_filename, output_jpeg_filename\n");
-                return 0;
+        printf("read from command line: kappa, iters,  input_jpeg_filename, output_jpeg_filename\n");
+        return 0;
     }
-
+    
+    //Desclare MPI-stuff
     MPI_Init (&argc, &argv);
     MPI_Comm_rank (MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size (MPI_COMM_WORLD, &num_procs); 
@@ -106,58 +109,60 @@ int main(int argc, char *argv[])
 
 
     /* read from command line: kappa, iters, input_jpeg_filename, output_jpeg_filename */
-    // TODO put in from serial
-    kappa = atof(argv[1]);
-    iters = atof(argv[2]);
+    kappa = atof(argv[2]);
+    iters = atof(argv[1]);
     input_jpeg_filename = argv[3];
     output_jpeg_filename = argv[4];  
-
+    
+    //importing the whole image in process 0
     if (my_rank==0) {
         import_JPEG_file(input_jpeg_filename, &image_chars, &m, &n, &c);
         allocate_image (&whole_image, m, n);
     }
 
+    //Broadcast so all m an n are the same in all processes
     MPI_Bcast (&m, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast (&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     /* divide the m x n pixels evenly among the MPI processes */
     my_m = m/num_procs;
-    int m_rest =  m%num_procs;
+    int m_rest =  m%num_procs; //if rows in picture can't be divided by number of processes
 
-    my_n = n;
-
+    my_n = n; //n is the same because we only divide the picture horisontally
+    
+    //Adding the rest to the last process
     if(my_rank == num_procs-1){
         my_m = my_m + m_rest;
     }
+    
+    int my_size = my_m*my_n; //setting size of the devided image-parts
 
-    int my_size = my_m*my_n;
-
+    //Allocating image_parts
     if (my_rank != 0){
         allocate_image (&u, my_m, my_n);
         allocate_image (&u_bar, my_m, my_n);
     } 
     else{
-        allocate_image (&u_bar, m, n);  
+        allocate_image (&u_bar, m, n); //allocating big picture 
         u.m = my_m;  //dot instead of -> because there is no pointer
-        u.n = my_n;
-        u.image_data = whole_image.image_data; 
+        u.n = my_n; //makes the 0 process think that it is a small picture for calculations
+        u.image_data = whole_image.image_data;//but gives it the adress to the whole picture
+    }
 
 
-    /* each process asks process 0 for a partitioned region */
+    //process 0 sends small parts of the picture to the other processes
     if (my_rank == 0){
         int i;
         for(i = 1; i < num_procs-1; i++){
-            MPI_Send(image_chars[i*my_m*my_n], my_size, MPI_CHAR, i, 0, MPI_COMM_WORLD);
+            MPI_Send(&image_chars[i*my_m*my_n], my_size, MPI_CHAR, i, 0, MPI_COMM_WORLD);
         }
-            MPI_Send(image_chars[(num_procs-1)*my_m*my_n], my_size + m_rest, MPI_CHAR, num_procs-1, 0, MPI_COMM_WORLD); 
+        MPI_Send(&image_chars[(num_procs-1)*my_m*my_n], my_size + m_rest, MPI_CHAR, num_procs-1, 0, MPI_COMM_WORLD);//last process gets a bigger part of the picture if there is a rest
     }
     else{
-        my_image_chars = (char*)malloc(my_size*sizeof(char));
-        MPI_Recv(&my_image_chars, my_size, MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+        my_image_chars = malloc(my_size*sizeof(char));//allocates space for the image-parts
+        MPI_Recv(my_image_chars, my_size, MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);//recives image-parts
     }
-
-    /* of image_chars and copy the values into u */
-    /* ... */
+        
     convert_jpeg_to_image (my_image_chars, &u);
     iso_diffusion_denoising(&u, &u_bar, kappa, iters);
 
@@ -168,9 +173,9 @@ int main(int argc, char *argv[])
     else{
         int i;
         for(i = 1; i < num_procs-1; i++){
-            MPI_Recv(u_bar.image_data[i*my_m*my_n], my_size, MPI_FLOAT, i, i, MPI_COMM_WORLD, &status);
+            MPI_Recv(u_bar.image_data[i*my_m*my_n], my_size, MPI_FLOAT, i, i, MPI_COMM_WORLD, &status); //process 0 recives content og u_bar
         }
-         MPI_Recv(u_bar.image_data[(num_procs-1)*my_m*my_n], my_size, MPI_FLOAT, num_procs -1, num_procs -1, MPI_COMM_WORLD, &status);
+        MPI_Recv(u_bar.image_data[(num_procs-1)*my_m*my_n], my_size, MPI_FLOAT, num_procs -1, num_procs -1, MPI_COMM_WORLD, &status); // the last bit has u_bar with bigger content if there is a rest
     }
 
     /* process 0 receives from each process incoming values and */

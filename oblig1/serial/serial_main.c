@@ -98,8 +98,8 @@ int main(int argc, char *argv[])
     }
 
     /* read from command line: kappa, iters, input_jpeg_filename, output_jpeg_filename */
-    kappa = atof(argv[1]);
-    iters = atof(argv[2]);
+    kappa = atof(argv[2]);
+    iters = atof(argv[1]);
     input_jpeg_filename = argv[3];
     output_jpeg_filename = argv[4];
 

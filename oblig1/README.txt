@@ -15,3 +15,9 @@ compile the programs by typing "make" in the terminal.
 When you are ready to deliver you enter the base directory
 and type "make delivery" in the terminal. A tarball with
 your updated files will then be created ready for delivery.
+
+##########################################################
+
+To run program for parallell:
+
+$ mpirun -np 4 ./program number of iterations kappa_value infile outfile
