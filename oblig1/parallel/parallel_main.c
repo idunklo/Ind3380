@@ -4,6 +4,12 @@
 
 // make use of two functions from the simplejpeg library
 
+void print_flush(const char* str, int rank)
+{
+    printf("%d :: %s\n", rank, str);
+    fflush(NULL);
+}
+
 void import_JPEG_file(const char *filename, unsigned char **image_chars,
         int *image_height, int *image_width,
         int *num_components);     
@@ -36,8 +42,6 @@ void allocate_image(image *u, int m, int n)
     int i;
     for (i = 0; i < m; i++){
         u -> image_data[i] = &u -> data_storage[i*n]; } ;
-
-    return;
 }
 
 //free the storage
@@ -71,7 +75,6 @@ void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters)
 { 
     int counter = 0;   
     int i, j;
-    float** tmp;
     while(counter <= iters){
         for (i = 1; i < u->m -1; i++){
             for (j = 1;  j <  u -> n -1; j++){ //unsure about the same as above
@@ -97,7 +100,7 @@ int main(int argc, char *argv[])
     int i, j;  //counter variables
     //Declaration of variables
     int m, n, c, iters;
-    int my_m, my_n, my_rank, num_procs, tmp_m, rows_counter;
+    int my_m, my_rank, num_procs, tmp_m, rows_counter;
     float kappa;
     image u, u_bar, whole_image;
     unsigned char *image_chars, *my_image_chars;
@@ -113,8 +116,10 @@ int main(int argc, char *argv[])
     MPI_Init (&argc, &argv);
     MPI_Comm_rank (MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size (MPI_COMM_WORLD, &num_procs); 
-    MPI_Status status;
 
+    print_flush("MPI init", my_rank);
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     /* read from command line: kappa, iters, input_jpeg_filename, output_jpeg_filename */
     kappa = atof(argv[2]);
@@ -125,96 +130,126 @@ int main(int argc, char *argv[])
     //importing the whole image in process 0
     if (my_rank==0) {
         import_JPEG_file(input_jpeg_filename, &image_chars, &m, &n, &c);
-        allocate_image (&whole_image, m, n);
+        //allocate_image (&whole_image, m, n);
+        print_flush("Read & allocated", my_rank);
     }
 
     //Broadcast so all m an n are the same in all processes
     MPI_Bcast (&m, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast (&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    print_flush("Broadcasted!!!", my_rank);
+
     /* divide the m x n pixels evenly among the MPI processes */
     my_m = m/num_procs;
-    my_n = n; //n is the same because we only divide the picture horisontally
     
     //Adding the rest to the last process
-    if(my_rank == num_procs-1){
-        my_m = my_m + m%num_procs;
+    if(my_rank < m%num_procs){
+        my_m = my_m + 1;
     }
 
     //Add padding rows
     if(my_rank == 0 || my_rank == num_procs-1){
-        my_m += 1;
+        my_m = my_m + 1;
     }
     else{
-        my_m += 2;
+        my_m = my_m + 2;
     }
-    
-    int my_size = my_m*my_n; //setting size of the devided image-parts
 
-    //Allocating image_parts
-    allocate_image (&u, my_m, my_n);
-    allocate_image (&u_bar, my_m, my_n);
+    
+    // //Allocating image_parts
+    allocate_image (&u, my_m, n);
+    allocate_image (&u_bar, my_m, n);
+
+    print_flush("Allocated image parts", my_rank);
 
     //process 0 sends small parts of the picture to the other processes
     if (my_rank == 0){
         rows_counter = my_m-1;
 
-        for(i = 1; i < num_procs-1; i++){
+        printf("0 :: %d\n", my_m);
+
+        for(i = 1; i < num_procs; i++){
             MPI_Recv(&tmp_m, 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            print_flush("Received size ...", my_rank);
             MPI_Send(&image_chars[(rows_counter-1)*n], tmp_m*n, MPI_UNSIGNED_CHAR, i, 0, MPI_COMM_WORLD);
+            print_flush("Sent part ...", my_rank);
             rows_counter += tmp_m - 2; //minus 2 to account for padding
         }
-        //rows_counter += 1;  //to account for last proc only having on padding row
+        rows_counter += 1;  //to account for last proc only having on padding row
     }
     else{
+        printf("%d :: %d\n", my_rank, my_m);
         MPI_Send(&my_m, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);
-        my_image_chars = (unsigned char*)malloc(my_size*sizeof(unsigned char));//allocates space for the image-parts
-        MPI_Recv(my_image_chars, my_size, MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);//recives image-parts
-    }
-        
-    convert_jpeg_to_image (my_image_chars, &u);
-    //iso_diffusion_denoising(&u, &u_bar, kappa, iters);
-
-    /* each process sends its resulting content of u_bar to process 0 */ 
-    if (my_rank != 0){
-        //remove padding rows
-        tmp_m = my_m - 2;
-        if(my_rank == num_procs-1){
-            tmp_m += 1;
-        }
-        //send u_bar
-        MPI_Send(&tmp_m, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);
-        MPI_Send(u_bar.image_data, tmp_m*my_n, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
-    }
-    else{
-        //copy rank 0 u_bar to whole_image
-        for (i = 0; i < my_m-1; ++i){
-            for (j = 0; j < my_n; ++j){
-                whole_image.image_data[i][j] = u_bar.image_data[i][j];
-            }
-        }
-        // recieve data from other procs
-        rows_counter = my_m-1;
-        for(i = 1; i < num_procs-1; i++){
-            MPI_Recv(&tmp_m, 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&whole_image.image_data[rows_counter][0], tmp_m*my_n, MPI_FLOAT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); //process 0 recives content og u_bar
-            rows_counter += tmp_m;
-        }
+        print_flush("Sent parts size ...", my_rank);
+        my_image_chars = (unsigned char*)malloc(my_m*n*sizeof(unsigned char));//allocates space for the image-parts
+        print_flush("Allocated 1D uchar storage ...", my_rank);
+        MPI_Recv(my_image_chars, my_m*n, MPI_UNSIGNED_CHAR, 0, i, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        print_flush("Received image data ...", my_rank);
     }
 
-    /* process 0 receives from each process incoming values and */
-    /* copy them into the designated region of struct whole_image */
-    /* ... */
-    if (my_rank==0) {
-        convert_image_to_jpeg(&whole_image, image_chars);
-        export_JPEG_file(output_jpeg_filename, image_chars, m, n, c, 75);
-        deallocate_image (&whole_image);
-    }
-    deallocate_image(&u);
-    deallocate_image(&u_bar);
-    if(my_rank != 0) {
-        free(my_image_chars);
-    }
+//    print_flush("Distributing data done!", my_rank);
+//        
+//    if(my_rank != 0) {
+//        convert_jpeg_to_image (my_image_chars, &u);
+//    }
+//    else{
+//        convert_jpeg_to_image (image_chars, &u);
+//    }
+//
+//    print_flush("Converted 1D to image!", my_rank);
+//
+//    //iso_diffusion_denoising(&u, &u_bar, kappa, iters);
+//
+//    print_flush("ISO diff. done!", my_rank);
+//
+//    /* each process sends its resulting content of u_bar to process 0 */ 
+//    if (my_rank != 0){
+//        //remove padding rows
+//        tmp_m = my_m - 2;
+//        if(my_rank == num_procs-1){
+//            tmp_m += 1;
+//        }
+//        //send u_bar
+//        MPI_Send(&tmp_m, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);
+//        print_flush("Sent part size!", my_rank);
+//        MPI_Send(u_bar.image_data[n], tmp_m*n, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
+//        print_flush("Sent part data!", my_rank);
+//    }
+//    else{
+//        //copy rank 0 u_bar to whole_image
+//        for (i = 0; i < my_m-1; ++i){
+//            for (j = 0; j < n; ++j){
+//                whole_image.image_data[i][j] = u_bar.image_data[i][j];
+//            }
+//        }
+//        print_flush("Copied from u_bar!", my_rank);
+//        // recieve data from other procs
+//        rows_counter = my_m-1;
+//        for(i = 1; i < num_procs; i++){
+//            MPI_Recv(&tmp_m, 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+//            print_flush("Received part size!", my_rank);
+//            MPI_Recv(&whole_image.image_data[rows_counter][0], tmp_m*n, MPI_FLOAT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); //process 0 recives content og u_bar
+//            print_flush("Received part data!", my_rank);
+//            rows_counter += tmp_m;
+//        }
+//    }
+//
+//    print_flush("Done collecting parts!", my_rank);
+//
+//    /* process 0 receives from each process incoming values and */
+//    /* copy them into the designated region of struct whole_image */
+//    /* ... */
+//    if (my_rank==0) {
+//        convert_image_to_jpeg(&whole_image, image_chars);
+//        export_JPEG_file(output_jpeg_filename, image_chars, m, n, c, 75);
+//        deallocate_image (&whole_image);
+//    }
+//    deallocate_image(&u);
+//    deallocate_image(&u_bar);
+//    if(my_rank != 0) {
+//        free(my_image_chars);
+//    }
 
     MPI_Finalize ();
     return 0;
