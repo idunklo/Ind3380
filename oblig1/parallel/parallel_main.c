@@ -6,8 +6,10 @@
 
 void print_flush(const char* str, int rank)
 {
+    /*
     printf("%d :: %s\n", rank, str);
     fflush(NULL);
+    */
 }
 
 void import_JPEG_file(const char *filename, unsigned char **image_chars,
@@ -244,7 +246,6 @@ int main(int argc, char *argv[])
         rows_counter = my_m-1;
         for(i = 1; i < num_procs; i++){
             MPI_Recv(&tmp_m, 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("0 :: %d\n", tmp_m);
             print_flush("Received part size!", my_rank);
             MPI_Recv(whole_image.image_data[rows_counter], tmp_m*n, MPI_FLOAT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); //process 0 recives content og u_bar
             print_flush("Received part data!", my_rank);
