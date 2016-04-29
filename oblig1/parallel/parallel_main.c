@@ -71,10 +71,12 @@ void convert_image_to_jpeg(const image * u, unsigned char* image_chars)
     }
 }       
 
-void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters)
+void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters, int num_procs, int my_rank)
 { 
     int counter = 0;   
     int i, j;
+    MPI_Request req;
+
     while(counter <= iters){
         for (i = 1; i < u->m -1; i++){
             for (j = 1;  j <  u -> n -1; j++){ //unsure about the same as above
@@ -85,6 +87,11 @@ void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters)
         }
         counter++;
     }
+    for (i = 1; i < u->m-1; ++i){
+        for(j = 1; j < u->n-1; ++j){
+            u->image_data[i][j] = u_bar->image_data[i][j];
+        }
+    }
 
     /*
     tmp = u->image_data;
@@ -93,6 +100,20 @@ void iso_diffusion_denoising(image *u, image *u_bar, float kappa, int iters)
 
     Does this work with work with mpi? 
     */ 
+    if (my_rank != 0){
+        MPI_Isend(u->image_data[1], u->n, MPI_FLOAT, my_rank-1, 10, MPI_COMM_WORLD, &req);
+        MPI_Request_free(&req);
+    }
+    if(my_rank != num_procs-1){
+        MPI_Isend(u->image_data[u->m-2], u->n, MPI_FLOAT, my_rank+1, 11, MPI_COMM_WORLD, &req);
+        MPI_Request_free(&req);
+    }
+    if (my_rank != 0) {
+        MPI_Recv(u->image_data[0], u->n, MPI_FLOAT, my_rank-1, 11, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    if (my_rank != num_procs-1) {
+        MPI_Recv(u->image_data[u->m-1], u->n, MPI_FLOAT, my_rank+1, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
 }     
 
 int main(int argc, char *argv[])  
@@ -120,8 +141,8 @@ int main(int argc, char *argv[])
     print_flush("MPI init", my_rank);
 
     /* read from command line: kappa, iters, input_jpeg_filename, output_jpeg_filename */
-    kappa = atof(argv[2]);
-    iters = atof(argv[1]);
+    kappa = atof(argv[1]);
+    iters = atof(argv[2]);
     input_jpeg_filename = argv[3];
     output_jpeg_filename = argv[4];  
     
@@ -194,7 +215,7 @@ int main(int argc, char *argv[])
 
     print_flush("Converted 1D to image!", my_rank);
 
-    //iso_diffusion_denoising(&u, &u_bar, kappa, iters);
+    iso_diffusion_denoising(&u, &u_bar, kappa, iters, num_procs, my_rank);
 
     print_flush("ISO diff. done!", my_rank);
 
