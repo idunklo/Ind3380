@@ -2,7 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
+/*
 typedef struct
 {
     int num_rows;
@@ -10,21 +12,107 @@ typedef struct
     double *matrix[0];
 }
 M; 
+*/
 
-void allocate_matrix(M *mat, int num_rows, int num_cols)
+void print_flush(const char* str, int rank)
 {
-    mat -> num_cols = num_cols;
-    mat -> num_rows = num_rows;
+    printf("%d :: %s\n", rank, str);
+    fflush(NULL);
+}     
 
-    mat -> matrix[0] = (double*)calloc(num_rows*num_cols, sizeof(double));
+void allocate_matrix(double*** matrix, int num_rows, int num_cols)
+{
+    int i;
+    *matrix = (double**)malloc((num_rows)*sizeof(double*));
+    (*matrix)[0] = (double*)calloc((num_rows)*(num_cols),sizeof(double));  
+    for (i=1; i<(num_rows); i++)
+        (*matrix)[i] = (*matrix)[i-1]+(num_cols);  
+    /*mat -> num_cols = num_cols;
+    mat -> num_rows = num_rows;*/
+
 }
+
+void deallocate(double ***matrix){
+    free((*matrix)[0]);
+    free(*matrix);
+}
+
+
+void divide( int num_rows, int num_cols, int *my_num_rows, int *my_num_cols, int my_rank, int *dims)
+   
+{
+    int x = my_rank % dims[0];
+    int y = (int)floor((double)my_rank / dims[0]);
+
+    *my_num_cols = floor((x+1) * (double)num_cols / dims[1]) - floor(x*(double)num_cols/ dims[1]);
+    *my_num_rows = floor((y+1) * (double)num_rows / dims[0]) - floor(y*(double)num_rows/ dims[0]); 
+
+    //using pointer to change the value outside the function. 
+    //dividing number of columns and row. See example solution exam 2012.  
+}    
+
+void MatrixMultiply(int n, double *a, double *b, double *c)
+{
+    int i, j, k;
+
+    for (i=0; i<n; i++)
+        for (j=0; j<n; j++)
+            for (k=0; k<n; k++)
+                c[i*n+j] += a[i*n+k]*b[k*n+j];
+}
+
+void MatrixMatrixMultiply(double *a, double *b, double *c, int num_cols, int num_rows, MPI_Comm comm)
+{
+    /*from the teaching book */
+    int i, j;
+    int n;
+    int nlocal;
+    int num_procs, dims[2], periods[2];
+    int myrank, my2drank, mycoords[2];
+    int uprank, downrank, leftrank, rightrank, coords[2];
+    int shiftsource, shiftdest;
+    MPI_Status status; 
+    MPI_Comm comm_2d;
+
+    MPI_Comm_size(comm, &num_procs);
+    MPI_Comm_rank(comm_2d, &my2drank);
+    MPI_Cart_coords(comm_2d, my2drank, 2, mycoords);
+
+    MPI_Cart_shift(comm_2d, 1, -1, &rightrank, &leftrank);
+    MPI_Cart_shift(comm_2d, 0, -1, &downrank, &uprank);
+
+    nlocal = n/dims[0];
+
+    MPI_Cart_shift(comm_2d, 0, -mycoords[0], &shiftsource, &shiftdest);
+    MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status); 
+
+ MPI_Cart_shift(comm_2d, 1, -mycoords[0], &shiftsource, &shiftdest);
+    MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
+
+for (i=0; i<dims[0]; i++){
+    MatrixMultiply(nlocal, a, b, c); /* c=c + a*b */
+
+    MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, leftrank, 1, rightrank, 1, comm_2d, &status);
+
+    MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, uprank, 1, downrank, 1, comm_2d, &status);   
+
+    MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
+    MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);   
+
+ MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
+    MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
+
+    MPI_Comm_free(&comm_2d);    
+}
+}
+    
 
 void read_matrix_binaryformat (char* filename, double*** matrix,
         int* num_rows, int* num_cols)
 {
     int i;
     FILE* fp = fopen (filename,"rb");
-    fread (num_rows, sizeof(int), 1, fp);
+    fread (num_rows, sizeof(int), 1, fp);                   
     fread (num_cols, sizeof(int), 1, fp);
     /* storage allocation of the matrix */
     *matrix = (double**)malloc((*num_rows)*sizeof(double*));
@@ -52,17 +140,45 @@ int main(int argc, char *argv[])
     //Declaration of variables
     int my_rank, num_procs;  
     int num_rows, num_cols;
-    double** matrix_a, matrix_b, matrix_c;   
-    M A, B;
-    
+    double **A, **B, **C;
+    int nrA, ncA, nrB, ncB;
+    double **a, **b, **c;  
+    int nra, nca, nrb, ncb;
 
-
-    /*
     //Declare MPI-suff
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
-    */
+
+    char *Mat_A, *Mat_B, *Mat_C;
+
+    Mat_A = argv[1];
+    Mat_B = argv[2];
+    Mat_C = argv[3];  
+
+    print_flush("taken arguments", my_rank);   
+
+    if(my_rank == 0){
+        read_matrix_binaryformat(Mat_A, &A, &nrA, &ncA );
+        read_matrix_binaryformat(Mat_B, &B, &nrB, &ncB );
+    }
+    print_flush("files read", my_rank);  
+
+    MPI_Bcast(&nrA, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&ncA, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&nrB, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&ncB, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+    if(my_rank ==0){
+        deallocate(&A);
+        deallocate(&B);
+    }
+
+
+    print_flush("deallocated", my_rank);  
+
+    MPI_Finalize();
     return 0;  
 
 }
