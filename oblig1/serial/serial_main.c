@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
     char *input_jpeg_filename, *output_jpeg_filename;
 
     if(argc!=5){
-        printf("read from command line: kappa, iters, input_jpeg_filename output_jpeg_filename\n");
+        printf("read from command line: iters, kappa, input_jpeg_filename output_jpeg_filename\n");
         return 0;
     }
 

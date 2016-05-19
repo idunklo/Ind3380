@@ -22,4 +22,3 @@ Added to readme by me:
 To run program for parallell:
 $ mpirun -np 4 ./program number of iterations kappa_value infile outfile
 
-Have cooperated with Mathias Kirkerød. The program doesn't work with how you can't work with the same process for the 0-process as for the others, but I can't figure out how to fix it.
