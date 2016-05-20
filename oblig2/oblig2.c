@@ -38,14 +38,14 @@ void deallocate(double ***matrix){
 }
 
 
-void divide( int num_rows, int num_cols, int *my_num_rows, int *my_num_cols, int my_rank, int *dims)
+void find_size( int num_rows, int num_cols, int *my_num_rows, int *my_num_cols, int my_rank, int sqrt_p)
    
 {
-    int x = my_rank % dims[0];
-    int y = (int)floor((double)my_rank / dims[0]);
+    int x = my_rank % sqrt_p;;
+    int y = (int)floor((double)my_rank / sqrt_p);
 
-    *my_num_cols = floor((x+1) * (double)num_cols / dims[1]) - floor(x*(double)num_cols/ dims[1]);
-    *my_num_rows = floor((y+1) * (double)num_rows / dims[0]) - floor(y*(double)num_rows/ dims[0]); 
+    *my_num_cols = floor((x+1) * (double)num_cols / sqrt_p) - floor(x*(double)num_cols/ sqrt_p);
+    *my_num_rows = floor((y+1) * (double)num_rows / sqrt_p) - floor(y*(double)num_rows/ sqrt_p); 
 
     //using pointer to change the value outside the function. 
     //dividing number of columns and row. See example solution exam 2012.  
@@ -132,7 +132,18 @@ void write_matrix_binaryformat (char* filename, double** matrix,
     fwrite (&num_cols, sizeof(int), 1, fp);
     fwrite (matrix[0], sizeof(double), num_rows*num_cols, fp);
     fclose (fp);
-}    
+}
+
+void find_max(int *values, int *max, int val_size) {
+    // find max value of a general array
+
+    *max = values[0];
+    for(int i=1; i<val_size; ++i) {
+        if(values[i] > *max) {
+            *max = values[i];
+        }
+    }
+}
 
 
 int main(int argc, char *argv[])
@@ -144,6 +155,9 @@ int main(int argc, char *argv[])
     int nrA, ncA, nrB, ncB;
     double **a, **b, **c;  
     int nra, nca, nrb, ncb;
+    int sqrt_p;
+    int *rsA, *csA, *rsB, *csB;
+    int mrA, mcA, mrB, mcB;
 
     //Declare MPI-suff
     MPI_Init(&argc, &argv);
@@ -154,7 +168,9 @@ int main(int argc, char *argv[])
 
     Mat_A = argv[1];
     Mat_B = argv[2];
-    Mat_C = argv[3];  
+    Mat_C = argv[3]; 
+
+    sqrt_p = sqrt(num_procs);
 
     print_flush("taken arguments", my_rank);   
 
@@ -167,8 +183,41 @@ int main(int argc, char *argv[])
     MPI_Bcast(&nrA, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&ncA, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&nrB, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&ncB, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&ncB, 1, MPI_INT, 0, MPI_COMM_WORLD);  
 
+    find_size(nrA, ncA, &nra, &nca, my_rank, sqrt_p); 
+    find_size(nrB, ncB, &nrb, &ncb, my_rank, sqrt_p);
+
+    rsA = (int*)calloc(num_procs,sizeof(int)); 
+    csA = (int*)calloc(num_procs,sizeof(int)); 
+    rsB = (int*)calloc(num_procs,sizeof(int)); 
+    csB = (int*)calloc(num_procs,sizeof(int)); 
+
+    for(int i=0; i<num_procs; ++i) {
+        if(i == my_rank) {
+            rsA[i] = nra;
+        }
+        MPI_Sendrecv(&nra, 1, MPI_INT, i, 1, &(rsA[i]), 1, MPI_INT, i, 1,
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Sendrecv(&nca, 1, MPI_INT, i, 1, &(csA[i]), 1, MPI_INT, i, 1,
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Sendrecv(&nrb, 1, MPI_INT, i, 1, &(rsB[i]), 1, MPI_INT, i, 1,
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Sendrecv(&nrb, 1, MPI_INT, i, 1, &(csB[i]), 1, MPI_INT, i, 1,
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        //printf("nra[%i] = %i, my_rank:%i\n", i, rsA[i], my_rank);
+    }
+
+    if(my_rank == 0) {
+        find_max(rsA, &mrA, num_procs);
+        find_max(csA, &mcA, num_procs);
+        find_max(rsB, &mrB, num_procs);
+        find_max(csB, &mcB, num_procs);
+    }
+
+    allocate_matrix(&a, mrA, mcA);
+    allocate_matrix(&b, mrB, mcB);
+    allocate_matrix(&c, mrA, mcB);
 
     if(my_rank ==0){
         deallocate(&A);
