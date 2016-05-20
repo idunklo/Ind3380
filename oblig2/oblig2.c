@@ -160,6 +160,48 @@ void find_max(int *values, int *max, int val_size) {
     }
 }
 
+void fill_matrix(double ***matrix, int nr, int nc) {
+    int k = 1;
+    for(int i=0; i<nr; ++i) {
+        for(int j=0; j<nc; ++j) {
+            (*matrix)[i][j] = ((double)(i+j)*0.02) * (double)k;
+        }
+        k *=-1;
+    }
+}
+
+void print_matrix(int nr, int nc, double **matrix, int rank, char id) {
+
+    for(int i=0; i<nr; ++i) {
+        for(int j=0; j<nc; ++j) {
+            printf("%f ", matrix[i][j]);
+        }
+        printf("row: %i Matrix: %c, rank: %i\n", i, id, rank);
+    }
+    printf("\n");
+}
+
+void test_result(int nrA, int ncA, int nrB, int ncB, double **A, double **B,
+        double **result) {
+
+    double **serial_result;
+    allocate_matrix(&serial_result, nrA, ncB);
+    MatrixMultiply(nrA, ncA, nrB, ncB, A, B, &serial_result);
+
+    int check = 0;
+    for(int i=0; i<nrA; ++i) {
+        for(int j=0; j<ncB; ++j) {
+            if((int)fabs(result[i][j] - serial_result[i][j]) != 0) {
+                printf("WRONG! (%i,%i) res: %f, real: %f\n", i,j, result[i][j], serial_result[i][j]);
+                check = 1;
+            }
+        }
+    }
+    if(!check) {
+        printf("Correct\n");
+    }
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -188,8 +230,19 @@ int main(int argc, char *argv[])
     sqrt_p = sqrt(num_procs);
 
     if(my_rank == 0){
-        read_matrix_binaryformat(Mat_A, &A, &nrA, &ncA );
-        read_matrix_binaryformat(Mat_B, &B, &nrB, &ncB );
+        //read_matrix_binaryformat(Mat_A, &A, &nrA, &ncA );
+        //read_matrix_binaryformat(Mat_B, &B, &nrB, &ncB );
+        nrA = 100;
+        ncA = 50;
+        nrB = 50;
+        ncB = 100;
+        allocate_matrix(&A, nrA, ncA);
+        allocate_matrix(&B, nrB, ncB);
+        fill_matrix(&A, nrA, ncA);
+        fill_matrix(&B, nrB, ncB);
+        char A_id = 'A', B_id = 'B';
+        print_matrix(nrA, ncA, A, my_rank, A_id);
+        print_matrix(nrB, ncB, B, my_rank, B_id);
     }
 
     MPI_Bcast(&nrA, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -200,23 +253,27 @@ int main(int argc, char *argv[])
     find_size(nrA, ncA, &nra, &nca, my_rank, sqrt_p); 
     find_size(nrB, ncB, &nrb, &ncb, my_rank, sqrt_p);
 
-    rsA = (int*)calloc(num_procs,sizeof(int)); 
-    csA = (int*)calloc(num_procs,sizeof(int)); 
-    rsB = (int*)calloc(num_procs,sizeof(int)); 
-    csB = (int*)calloc(num_procs,sizeof(int)); 
+    rsA = (int*)malloc(num_procs*sizeof(int)); 
+    csA = (int*)malloc(num_procs*sizeof(int)); 
+    rsB = (int*)malloc(num_procs*sizeof(int)); 
+    csB = (int*)malloc(num_procs*sizeof(int)); 
 
     for(int i=0; i<num_procs; ++i) {
         if(i == my_rank) {
             rsA[i] = nra;
+            csA[i] = nca;
+            rsB[i] = nrb;
+            csB[i] = ncb;
+        } else {
+            MPI_Sendrecv(&nra, 1, MPI_INT, i, 1, &(rsA[i]), 1, MPI_INT, i, 1,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Sendrecv(&nca, 1, MPI_INT, i, 1, &(csA[i]), 1, MPI_INT, i, 1,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Sendrecv(&nrb, 1, MPI_INT, i, 1, &(rsB[i]), 1, MPI_INT, i, 1,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Sendrecv(&ncb, 1, MPI_INT, i, 1, &(csB[i]), 1, MPI_INT, i, 1,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
-        MPI_Sendrecv(&nra, 1, MPI_INT, i, 1, &(rsA[i]), 1, MPI_INT, i, 1,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Sendrecv(&nca, 1, MPI_INT, i, 1, &(csA[i]), 1, MPI_INT, i, 1,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Sendrecv(&nrb, 1, MPI_INT, i, 1, &(rsB[i]), 1, MPI_INT, i, 1,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Sendrecv(&ncb, 1, MPI_INT, i, 1, &(csB[i]), 1, MPI_INT, i, 1,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         //printf("nra[%i] = %i, my_rank:%i\n", i, rsA[i], my_rank);
     }
 
@@ -295,8 +352,8 @@ int main(int argc, char *argv[])
         }
 
         // deallocate A and B
-        deallocate(&A);
-        deallocate(&B);
+        //deallocate(&A);
+        //deallocate(&B);
     } else {
         // slaves recv from root a chunk/block/somethgin
 
@@ -321,7 +378,13 @@ int main(int argc, char *argv[])
         // free types
         MPI_Type_free(&btA);
         MPI_Type_free(&btB);
+        //char a_id = 'a', b_id = 'b';
+        //print_matrix(nra, nca, a, my_rank, a_id);
     }
+
+    char a_id = 'a', b_id = 'b';
+    //print_matrix(nra, nca, a, my_rank, a_id);
+    //print_matrix(nrb, ncb, b, my_rank, b_id);
 
     MatrixMatrixMultiply(&a, &b, &c, mrA, mcA, mrB, mcB, rsA, csA, rsB, csB,
             MPI_COMM_WORLD);
@@ -344,11 +407,11 @@ int main(int argc, char *argv[])
         int ciC = csB[0];
         int tmpk = 1;
         for(int k=1; k<num_procs; ++k) {
-            printf("%i, %i, %i\n", rsA[k], csB[k], k);
             MPI_Type_vector(rsA[k], csB[k], ncB, MPI_DOUBLE, &btC);
             MPI_Type_create_resized(btC, 0, sizeof(double), &btC);
             MPI_Type_commit(&btC);
 
+            printf("%i\n", ncB*riC+ciC);
             MPI_Recv(&((*C)[ncB*riC+ciC]), 1, btC, k, k, MPI_COMM_WORLD,
                     MPI_STATUS_IGNORE);
 
@@ -362,8 +425,15 @@ int main(int argc, char *argv[])
                 tmpk = 0;
             }
         }
+
+        //read_matrix_binaryformat(Mat_A, &A, &nrA, &ncA );
+        //read_matrix_binaryformat(Mat_B, &B, &nrB, &ncB );
+        test_result(nrA, ncA, nrB, ncB, A, B, C);
+        //test_result(nrA, ncA, nrB, ncB, A, B, C);
+        deallocate(&A);
+        deallocate(&B);
+        deallocate(&C);
     } else {
-        printf("BALLE %i %i\n", mcB, my_rank);
         MPI_Datatype btC;
         MPI_Type_vector(nra, ncb, mcB, MPI_DOUBLE, &btC);
         MPI_Type_create_resized(btC, 0, sizeof(double), &btC);
