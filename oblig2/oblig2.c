@@ -51,21 +51,23 @@ void find_size( int num_rows, int num_cols, int *my_num_rows, int *my_num_cols, 
     //dividing number of columns and row. See example solution exam 2012.  
 }    
 
-void MatrixMultiply(int n, double *a, double *b, double *c)
+void MatrixMultiply(int ra, int ca, int rb, int cb, double **a, double **b,
+        double ***c)
 {
     int i, j, k;
 
-    for (i=0; i<n; i++)
-        for (j=0; j<n; j++)
-            for (k=0; k<n; k++)
-                c[i*n+j] += a[i*n+k]*b[k*n+j];
+    for (i=0; i<ra; i++)
+        for (j=0; j<cb; j++)
+            for (k=0; k<rb; k++)
+                (*c)[i][j] += a[i][k]*b[k][j];
 }
 
-void MatrixMatrixMultiply(double *a, double *b, double *c, int num_cols, int num_rows, MPI_Comm comm)
+void MatrixMatrixMultiply(double ***a, double ***b, double ***c, int mra, int
+        mca, int mrb, int mcb, int *ra, int *ca, int *rb, int *cb, MPI_Comm
+        comm)
 {
     /*from the teaching book */
     int i, j;
-    int n;
     int nlocal;
     int num_procs, dims[2], periods[2];
     int myrank, my2drank, mycoords[2];
@@ -81,29 +83,36 @@ void MatrixMatrixMultiply(double *a, double *b, double *c, int num_cols, int num
     MPI_Cart_shift(comm_2d, 1, -1, &rightrank, &leftrank);
     MPI_Cart_shift(comm_2d, 0, -1, &downrank, &uprank);
 
-    nlocal = n/dims[0];
+    int ia = my2drank;
+    int ib = my2drank;
 
     MPI_Cart_shift(comm_2d, 0, -mycoords[0], &shiftsource, &shiftdest);
-    MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status); 
+    MPI_Sendrecv_replace((*a)[0], mra*mca, MPI_DOUBLE, shiftdest, 1,
+            shiftsource, 1, comm_2d, &status);
+    MPI_Sendrecv_replace(&ia, 1, MPI_INT, shiftdest, 1, shiftsource, 1,
+            comm_2d, &status);
 
     MPI_Cart_shift(comm_2d, 1, -mycoords[0], &shiftsource, &shiftdest);
-    MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
+    MPI_Sendrecv_replace((*b)[0], mrb*mcb, MPI_DOUBLE, shiftdest, 1,
+            shiftsource, 1, comm_2d, &status);  
+    MPI_Sendrecv_replace(&ib, 1, MPI_INT, shiftdest, 1, shiftsource, 1,
+            comm_2d, &status);
 
     for (i=0; i<dims[0]; i++){
-        MatrixMultiply(nlocal, a, b, c); /* c=c + a*b */
+        MatrixMultiply(ra[ia], ca[ia], rb[ib], cb[ib], *a, *b, c); /* c=c + a*b */
 
-        MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, leftrank, 1, rightrank, 1, comm_2d, &status);
+        MPI_Sendrecv_replace((*a)[0], mra*mca, MPI_DOUBLE, leftrank, 1,
+                rightrank, 1, comm_2d, &status);
+        MPI_Sendrecv_replace((*b)[0], mrb*mcb, MPI_DOUBLE, uprank, 1, downrank,
+                1, comm_2d, &status);
 
-        MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, uprank, 1, downrank, 1, comm_2d, &status);   
-
-        MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
-        MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);   
-
-        MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
-        MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
-
-        MPI_Comm_free(&comm_2d);    
+        MPI_Sendrecv_replace(&ia, i, MPI_INT, leftrank, 1, rightrank, 1,
+                comm_2d, &status);
+        MPI_Sendrecv_replace(&ib, i, MPI_INT, leftrank, 1, rightrank, 1,
+                comm_2d, &status);
     }
+
+    MPI_Comm_free(&comm_2d);    
 }
 
 
@@ -312,6 +321,8 @@ int main(int argc, char *argv[])
         MPI_Type_free(&btA);
         MPI_Type_free(&btB);
     }
+
+    
 
     print_flush("deallocated", my_rank);  
 
