@@ -187,13 +187,10 @@ int main(int argc, char *argv[])
 
     sqrt_p = sqrt(num_procs);
 
-    print_flush("taken arguments", my_rank);   
-
     if(my_rank == 0){
         read_matrix_binaryformat(Mat_A, &A, &nrA, &ncA );
         read_matrix_binaryformat(Mat_B, &B, &nrB, &ncB );
     }
-    print_flush("files read", my_rank);  
 
     MPI_Bcast(&nrA, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&ncA, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -218,7 +215,7 @@ int main(int argc, char *argv[])
                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Sendrecv(&nrb, 1, MPI_INT, i, 1, &(rsB[i]), 1, MPI_INT, i, 1,
                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Sendrecv(&nrb, 1, MPI_INT, i, 1, &(csB[i]), 1, MPI_INT, i, 1,
+        MPI_Sendrecv(&ncb, 1, MPI_INT, i, 1, &(csB[i]), 1, MPI_INT, i, 1,
                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         //printf("nra[%i] = %i, my_rank:%i\n", i, rsA[i], my_rank);
     }
@@ -287,10 +284,8 @@ int main(int argc, char *argv[])
             ciB += csB[k];
             tmpk++;
 
-            printf("tmpk: %i, k: %i\n", tmpk, k);
             if(tmpk == sqrt_p) {
                 // jump down to next chunk row
-                printf("INNER WHORE %i\n", tmpk);
                 riA += rsA[k-1];
                 riB += rsB[k-1];
                 ciA = 0;
@@ -331,13 +326,64 @@ int main(int argc, char *argv[])
     MatrixMatrixMultiply(&a, &b, &c, mrA, mcA, mrB, mcB, rsA, csA, rsB, csB,
             MPI_COMM_WORLD);
 
-    print_flush("deallocated", my_rank);  
+    if(my_rank == 0) {
+
+        // allocate result
+        allocate_matrix(&C, nrA, ncB);
+
+        // root sets its own matrices
+        for(int i=0; i<nra; ++i) {
+            for(int j=0; j<ncb; ++j) {
+                C[i][j] = c[i][j];
+            }
+        }
+
+        MPI_Datatype btC;
+
+        int riC = 0;
+        int ciC = csB[0];
+        int tmpk = 1;
+        for(int k=1; k<num_procs; ++k) {
+            printf("%i, %i, %i\n", rsA[k], csB[k], k);
+            MPI_Type_vector(rsA[k], csB[k], ncB, MPI_DOUBLE, &btC);
+            MPI_Type_create_resized(btC, 0, sizeof(double), &btC);
+            MPI_Type_commit(&btC);
+
+            MPI_Recv(&((*C)[ncB*riC+ciC]), 1, btC, k, k, MPI_COMM_WORLD,
+                    MPI_STATUS_IGNORE);
+
+            MPI_Type_free(&btC);
+
+            ciC += csB[k];
+
+            if(tmpk == sqrt_p) {
+                riC += rsA[k-1];
+                ciC = 0;
+                tmpk = 0;
+            }
+        }
+    } else {
+        printf("BALLE %i %i\n", mcB, my_rank);
+        MPI_Datatype btC;
+        MPI_Type_vector(nra, ncb, mcB, MPI_DOUBLE, &btC);
+        MPI_Type_create_resized(btC, 0, sizeof(double), &btC);
+        MPI_Type_commit(&btC);
+
+        MPI_Send(&((*c)[0]), 1, btC, 0, my_rank, MPI_COMM_WORLD);
+
+        MPI_Type_free(&btC);
+    }
 
     // deallocate sub matrices
     deallocate(&a); 
     deallocate(&b);
     deallocate(&c);
 
+    free(rsA);
+    free(csA);
+    free(rsB);
+    free(csB);
+    
     MPI_Finalize();
     return 0;  
 
