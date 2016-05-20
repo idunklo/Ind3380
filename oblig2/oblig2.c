@@ -68,7 +68,6 @@ void MatrixMatrixMultiply(double ***a, double ***b, double ***c, int mra, int
 {
     /*from the teaching book */
     int i, j;
-    int nlocal;
     int num_procs, dims[2], periods[2];
     int myrank, my2drank, mycoords[2];
     int uprank, downrank, leftrank, rightrank, coords[2];
@@ -78,6 +77,13 @@ void MatrixMatrixMultiply(double ***a, double ***b, double ***c, int mra, int
 
     MPI_Comm_size(comm, &num_procs);
     MPI_Comm_rank(comm_2d, &my2drank);
+    
+    dims[0] = dims[1] = 0;
+    MPI_Dims_create(num_procs, 2, dims);
+    periods[0]= periods[1] = 1;
+
+    MPI_Cart_create(comm, 2, dims, periods, 1, &comm_2d);
+    MPI_Comm_rank(comm_2d, &my2drank);
     MPI_Cart_coords(comm_2d, my2drank, 2, mycoords);
 
     MPI_Cart_shift(comm_2d, 1, -1, &rightrank, &leftrank);
@@ -86,13 +92,13 @@ void MatrixMatrixMultiply(double ***a, double ***b, double ***c, int mra, int
     int ia = my2drank;
     int ib = my2drank;
 
-    MPI_Cart_shift(comm_2d, 0, -mycoords[0], &shiftsource, &shiftdest);
+    MPI_Cart_shift(comm_2d, 1, -mycoords[0], &shiftsource, &shiftdest);
     MPI_Sendrecv_replace((*a)[0], mra*mca, MPI_DOUBLE, shiftdest, 1,
             shiftsource, 1, comm_2d, &status);
     MPI_Sendrecv_replace(&ia, 1, MPI_INT, shiftdest, 1, shiftsource, 1,
             comm_2d, &status);
 
-    MPI_Cart_shift(comm_2d, 1, -mycoords[0], &shiftsource, &shiftdest);
+    MPI_Cart_shift(comm_2d, 0, -mycoords[1], &shiftsource, &shiftdest);
     MPI_Sendrecv_replace((*b)[0], mrb*mcb, MPI_DOUBLE, shiftdest, 1,
             shiftsource, 1, comm_2d, &status);  
     MPI_Sendrecv_replace(&ib, 1, MPI_INT, shiftdest, 1, shiftsource, 1,
@@ -106,9 +112,9 @@ void MatrixMatrixMultiply(double ***a, double ***b, double ***c, int mra, int
         MPI_Sendrecv_replace((*b)[0], mrb*mcb, MPI_DOUBLE, uprank, 1, downrank,
                 1, comm_2d, &status);
 
-        MPI_Sendrecv_replace(&ia, i, MPI_INT, leftrank, 1, rightrank, 1,
+        MPI_Sendrecv_replace(&ia, 1, MPI_INT, leftrank, 1, rightrank, 1,
                 comm_2d, &status);
-        MPI_Sendrecv_replace(&ib, i, MPI_INT, leftrank, 1, rightrank, 1,
+        MPI_Sendrecv_replace(&ib, 1, MPI_INT, uprank, 1, downrank, 1,
                 comm_2d, &status);
     }
 
@@ -322,7 +328,8 @@ int main(int argc, char *argv[])
         MPI_Type_free(&btB);
     }
 
-    
+    MatrixMatrixMultiply(&a, &b, &c, mrA, mcA, mrB, mcB, rsA, csA, rsB, csB,
+            MPI_COMM_WORLD);
 
     print_flush("deallocated", my_rank);  
 
