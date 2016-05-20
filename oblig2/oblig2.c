@@ -5,14 +5,14 @@
 #include <math.h>
 
 /*
-typedef struct
-{
-    int num_rows;
-    int num_cols;
-    double *matrix[0];
-}
-M; 
-*/
+   typedef struct
+   {
+   int num_rows;
+   int num_cols;
+   double *matrix[0];
+   }
+   M; 
+   */
 
 void print_flush(const char* str, int rank)
 {
@@ -28,7 +28,7 @@ void allocate_matrix(double*** matrix, int num_rows, int num_cols)
     for (i=1; i<(num_rows); i++)
         (*matrix)[i] = (*matrix)[i-1]+(num_cols);  
     /*mat -> num_cols = num_cols;
-    mat -> num_rows = num_rows;*/
+      mat -> num_rows = num_rows;*/
 
 }
 
@@ -39,7 +39,7 @@ void deallocate(double ***matrix){
 
 
 void find_size( int num_rows, int num_cols, int *my_num_rows, int *my_num_cols, int my_rank, int sqrt_p)
-   
+
 {
     int x = my_rank % sqrt_p;;
     int y = (int)floor((double)my_rank / sqrt_p);
@@ -86,26 +86,26 @@ void MatrixMatrixMultiply(double *a, double *b, double *c, int num_cols, int num
     MPI_Cart_shift(comm_2d, 0, -mycoords[0], &shiftsource, &shiftdest);
     MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status); 
 
- MPI_Cart_shift(comm_2d, 1, -mycoords[0], &shiftsource, &shiftdest);
+    MPI_Cart_shift(comm_2d, 1, -mycoords[0], &shiftsource, &shiftdest);
     MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
 
-for (i=0; i<dims[0]; i++){
-    MatrixMultiply(nlocal, a, b, c); /* c=c + a*b */
+    for (i=0; i<dims[0]; i++){
+        MatrixMultiply(nlocal, a, b, c); /* c=c + a*b */
 
-    MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, leftrank, 1, rightrank, 1, comm_2d, &status);
+        MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, leftrank, 1, rightrank, 1, comm_2d, &status);
 
-    MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, uprank, 1, downrank, 1, comm_2d, &status);   
+        MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, uprank, 1, downrank, 1, comm_2d, &status);   
 
-    MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
-    MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);   
+        MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
+        MPI_Sendrecv_replace(a, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);   
 
- MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
-    MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
+        MPI_Cart_shift(comm_2d, 0, +mycoords[0], &shiftsource, &shiftdest);
+        MPI_Sendrecv_replace(b, nlocal*nlocal, MPI_DOUBLE, shiftdest, 1, shiftsource, 1, comm_2d, &status);  
 
-    MPI_Comm_free(&comm_2d);    
+        MPI_Comm_free(&comm_2d);    
+    }
 }
-}
-    
+
 
 void read_matrix_binaryformat (char* filename, double*** matrix,
         int* num_rows, int* num_cols)
@@ -208,6 +208,7 @@ int main(int argc, char *argv[])
         //printf("nra[%i] = %i, my_rank:%i\n", i, rsA[i], my_rank);
     }
 
+    // root finds large enough sizes
     if(my_rank == 0) {
         find_max(rsA, &mrA, num_procs);
         find_max(csA, &mcA, num_procs);
@@ -215,17 +216,109 @@ int main(int argc, char *argv[])
         find_max(csB, &mcB, num_procs);
     }
 
+    // send bigbuffs to all
+    MPI_Bcast(&mrA, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&mcA, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&mrB, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&mcB, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // allocate sub matrices
     allocate_matrix(&a, mrA, mcA);
     allocate_matrix(&b, mrB, mcB);
     allocate_matrix(&c, mrA, mcB);
 
-    if(my_rank ==0){
+    if(my_rank == 0) {
+
+        // root sets its own matrices
+        for(int i=0; i<nra; ++i) {
+            for(int j=0; j<nca; ++j) {
+                a[i][j] = A[i][j];
+            }
+        }
+        for(int i=0; i<nrb; ++i) {
+            for(int j=0; j<ncb; ++j) {
+                b[i][j] = B[i][j];
+            }
+        }
+
+        MPI_Datatype btA;
+        MPI_Datatype btB;
+
+        // initialize row and column index variables
+        int riA = 0;
+        int riB = 0;
+        int ciA = csA[0];
+        int ciB = csB[0];
+        int tmpk = 1;
+        for(int k=1; k<num_procs; ++k) {
+            //send to slaves 
+            // create strided types (blocks/chunks/blarg)
+            MPI_Type_vector(rsA[k], csA[k], ncA, MPI_DOUBLE, &btA);
+            MPI_Type_create_resized(btA, 0, sizeof(double), &btA);
+            MPI_Type_commit(&btA);
+            MPI_Type_vector(rsB[k], csB[k], ncB, MPI_DOUBLE, &btB);
+            MPI_Type_create_resized(btB, 0, sizeof(double), &btB);
+            MPI_Type_commit(&btB);
+
+            // send to slaves
+            MPI_Send(&((*A)[ncA*riA + ciA]), 1, btA, k, 1, MPI_COMM_WORLD);
+            MPI_Send(&((*B)[ncB*riB + ciB]), 1, btB, k, 2, MPI_COMM_WORLD);
+
+            // free types for next iteration
+            MPI_Type_free(&btA);
+            MPI_Type_free(&btB);
+
+            ciA += csA[k];
+            ciB += csB[k];
+            tmpk++;
+
+            printf("tmpk: %i, k: %i\n", tmpk, k);
+            if(tmpk == sqrt_p) {
+                // jump down to next chunk row
+                printf("INNER WHORE %i\n", tmpk);
+                riA += rsA[k-1];
+                riB += rsB[k-1];
+                ciA = 0;
+                ciB = 0;
+                tmpk = 0;
+            }
+        }
+
+        // deallocate A and B
         deallocate(&A);
         deallocate(&B);
+    } else {
+        // slaves recv from root a chunk/block/somethgin
+
+        // create data types
+        MPI_Datatype btA;
+        MPI_Datatype btB;
+        
+        // create strided data types
+        MPI_Type_vector(nra, nca, mcA, MPI_DOUBLE, &btA);
+        MPI_Type_create_resized(btA, 0, sizeof(double), &btA);
+        MPI_Type_commit(&btA);
+        MPI_Type_vector(nrb, ncb, mcB, MPI_DOUBLE, &btB);
+        MPI_Type_create_resized(btB, 0, sizeof(double), &btB);
+        MPI_Type_commit(&btB);
+
+        // recv from root a chunk
+        MPI_Recv(&((*a)[0]), 1, btA, 0, 1, MPI_COMM_WORLD,
+                MPI_STATUS_IGNORE);
+        MPI_Recv(&((*b)[0]), 1, btB, 0, 2, MPI_COMM_WORLD,
+                MPI_STATUS_IGNORE);
+
+        // free types
+        MPI_Type_free(&btA);
+        MPI_Type_free(&btB);
     }
 
-
     print_flush("deallocated", my_rank);  
+
+    // deallocate sub matrices
+    deallocate(&a); 
+    deallocate(&b);
+    deallocate(&c);
 
     MPI_Finalize();
     return 0;  
